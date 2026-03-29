@@ -1,0 +1,9 @@
+{
+  "secret_id": "",
+  "secret_key": "",
+  "region": "ap-shanghai",
+  "engine_model_type": "16k_zh",
+  "res_text_format": 3,
+  "channel_num": 1,
+  "enabled": true
+}

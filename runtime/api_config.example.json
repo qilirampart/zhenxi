@@ -1,0 +1,16 @@
+{
+  "active_provider_id": "provider-default",
+  "providers": [
+    {
+      "name": "默认通道",
+      "base_url": "https://api.example.com/v1",
+      "api_key": "",
+      "model": "gpt-4o",
+      "prompt": "请提取这张图片中所有可见的文字，按从上到下从左到右的顺序输出，每行文字单独一行，只输出文字内容本身，不要任何解释、标点符号以外的额外内容。",
+      "timeout_seconds": 30.0,
+      "max_tokens": 1000,
+      "enabled": true,
+      "id": "provider-default"
+    }
+  ]
+}
