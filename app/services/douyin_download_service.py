@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
-from urllib.error import HTTPError
+import requests
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 from app.config.settings import DOWNLOADER_CONFIG_PATH
 from app.utils.paths import build_download_output_path
@@ -130,12 +132,16 @@ class DouyinDownloadService:
 
         self._check_cancelled(should_cancel)
         parser_url = self._build_parser_url(str(config.get("parser_base_url", "")), share_url)
-        request = Request(parser_url, headers=self._default_headers())
 
         try:
-            with urlopen(request, timeout=float(config.get("timeout_seconds", 45))) as response:
-                charset = response.headers.get_content_charset() or "utf-8"
-                body = response.read().decode(charset, errors="replace").strip()
+            response = self._session().get(
+                parser_url,
+                headers=self._default_headers(),
+                timeout=float(config.get("timeout_seconds", 45)),
+                allow_redirects=True,
+            )
+            response.raise_for_status()
+            body = response.text.strip()
         except Exception as exc:  # noqa: BLE001
             raise DouyinDownloadError(f"解析抖音分享链接失败: {exc}") from exc
 
@@ -172,26 +178,32 @@ class DouyinDownloadService:
 
         for headers in self._download_header_variants(source_url):
             self._check_cancelled(should_cancel)
-            request = Request(source_url, headers=headers)
             try:
-                with urlopen(request, timeout=timeout) as response, open(target_path, "wb") as handle:
+                with self._session().get(
+                    source_url,
+                    headers=headers,
+                    timeout=timeout,
+                    allow_redirects=True,
+                    stream=True,
+                ) as response, open(target_path, "wb") as handle:
+                    response.raise_for_status()
                     total = int(response.headers.get("Content-Length") or 0)
                     downloaded = 0
-                    while True:
+                    for chunk in response.iter_content(chunk_size=1024 * 128):
                         self._check_cancelled(should_cancel)
-                        chunk = response.read(1024 * 128)
                         if not chunk:
-                            break
+                            continue
                         handle.write(chunk)
                         downloaded += len(chunk)
                         if progress_callback is not None:
                             progress_callback(downloaded, total)
                 return
-            except HTTPError as exc:
+            except requests.HTTPError as exc:
                 last_error = exc
                 if target_path.exists():
                     target_path.unlink(missing_ok=True)
-                if exc.code not in {401, 403, 429}:
+                status_code = exc.response.status_code if exc.response is not None else None
+                if status_code not in {401, 403, 429}:
                     break
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
@@ -201,11 +213,27 @@ class DouyinDownloadService:
         if target_path.exists():
             target_path.unlink(missing_ok=True)
 
-        if isinstance(last_error, HTTPError):
-            raise DouyinDownloadError(f"直链请求被拒绝，HTTP {last_error.code}") from last_error
+        if isinstance(last_error, requests.HTTPError):
+            status_code = last_error.response.status_code if last_error.response is not None else "unknown"
+            raise DouyinDownloadError(f"直链请求被拒绝，HTTP {status_code}") from last_error
         if last_error is not None:
             raise DouyinDownloadError(f"下载直链失败: {last_error}") from last_error
         raise DouyinDownloadError("下载直链失败，未获取到可用响应。")
+
+    @staticmethod
+    def _session() -> requests.Session:
+        session = requests.Session()
+        session.trust_env = False
+        return session
+
+    @staticmethod
+    def _open_url(request: Request, *, timeout: float):
+        try:
+            return urlopen(request, timeout=timeout)
+        except (URLError, OSError) as exc:
+            if not DouyinDownloadService._should_retry_without_proxy(exc):
+                raise
+            return DouyinDownloadService._open_url_without_proxy(request, timeout=timeout)
 
     def _default_headers(self) -> dict[str, str]:
         config = self.load_config()
@@ -345,3 +373,33 @@ class DouyinDownloadService:
     def _check_cancelled(should_cancel: CancelCallback | None) -> None:
         if should_cancel is not None and should_cancel():
             raise DouyinDownloadError("下载已取消。")
+
+    @staticmethod
+    def _should_retry_without_proxy(exc: BaseException) -> bool:
+        return isinstance(exc, (URLError, OSError))
+
+    @staticmethod
+    def _open_url_without_proxy(request: Request, *, timeout: float):
+        proxy_keys = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+        previous = {key: os.environ.pop(key, None) for key in proxy_keys}
+        previous_no_proxy = os.environ.get("NO_PROXY")
+        previous_no_proxy_lower = os.environ.get("no_proxy")
+        os.environ["NO_PROXY"] = "*"
+        os.environ["no_proxy"] = "*"
+        try:
+            opener = build_opener(ProxyHandler({}))
+            return opener.open(request, timeout=timeout)
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            if previous_no_proxy is None:
+                os.environ.pop("NO_PROXY", None)
+            else:
+                os.environ["NO_PROXY"] = previous_no_proxy
+            if previous_no_proxy_lower is None:
+                os.environ.pop("no_proxy", None)
+            else:
+                os.environ["no_proxy"] = previous_no_proxy_lower

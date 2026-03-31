@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.error import URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 from app.config.settings import DOWNLOADER_CONFIG_PATH
 from app.services.douyin_download_service import DouyinDownloadService
@@ -321,7 +323,7 @@ class MultiPlatformDownloadService:
     def _fetch_html(self, url: str, referer: str | None = None) -> tuple[str, str]:
         request = Request(url, headers=self._build_headers(referer=referer))
         try:
-            with urlopen(request, timeout=float(self.load_config().get("timeout_seconds", 45))) as response:
+            with self._open_url(request, timeout=float(self.load_config().get("timeout_seconds", 45))) as response:
                 charset = response.headers.get_content_charset() or "utf-8"
                 text = response.read().decode(charset, errors="replace")
                 return response.geturl(), text
@@ -331,7 +333,7 @@ class MultiPlatformDownloadService:
     def _resolve_final_url(self, url: str, referer: str | None = None) -> str:
         request = Request(url, headers=self._build_headers(referer=referer))
         try:
-            with urlopen(request, timeout=float(self.load_config().get("timeout_seconds", 45))) as response:
+            with self._open_url(request, timeout=float(self.load_config().get("timeout_seconds", 45))) as response:
                 return response.geturl()
         except Exception as exc:  # noqa: BLE001
             raise MediaDownloadError(f"展开短链失败：{exc}") from exc
@@ -339,7 +341,7 @@ class MultiPlatformDownloadService:
     def _fetch_json(self, url: str, referer: str | None = None) -> dict:
         request = Request(url, headers=self._build_headers(referer=referer, accept="application/json,text/plain,*/*"))
         try:
-            with urlopen(request, timeout=float(self.load_config().get("timeout_seconds", 45))) as response:
+            with self._open_url(request, timeout=float(self.load_config().get("timeout_seconds", 45))) as response:
                 charset = response.headers.get_content_charset() or "utf-8"
                 return json.loads(response.read().decode(charset, errors="replace"))
         except Exception as exc:  # noqa: BLE001
@@ -357,7 +359,7 @@ class MultiPlatformDownloadService:
         request = Request(source_url, headers=self._build_headers(referer=referer, accept="*/*"))
         timeout = float(self.load_config().get("timeout_seconds", 45))
         try:
-            with urlopen(request, timeout=timeout) as response, open(target_path, "wb") as handle:
+            with self._open_url(request, timeout=timeout) as response, open(target_path, "wb") as handle:
                 total = int(response.headers.get("Content-Length") or 0)
                 downloaded = 0
                 while True:
@@ -372,6 +374,15 @@ class MultiPlatformDownloadService:
         except Exception as exc:  # noqa: BLE001
             target_path.unlink(missing_ok=True)
             raise MediaDownloadError(f"下载媒体文件失败：{exc}") from exc
+
+    @staticmethod
+    def _open_url(request: Request, *, timeout: float):
+        try:
+            return urlopen(request, timeout=timeout)
+        except (URLError, OSError) as exc:
+            if not MultiPlatformDownloadService._should_retry_without_proxy(exc):
+                raise
+            return MultiPlatformDownloadService._open_url_without_proxy(request, timeout=timeout)
 
     @staticmethod
     def _check_cancelled(should_cancel) -> None:
@@ -576,3 +587,33 @@ class MultiPlatformDownloadService:
         if suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
             return suffix
         return ".jpg"
+
+    @staticmethod
+    def _should_retry_without_proxy(exc: BaseException) -> bool:
+        return isinstance(exc, (URLError, OSError))
+
+    @staticmethod
+    def _open_url_without_proxy(request: Request, *, timeout: float):
+        proxy_keys = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+        previous = {key: os.environ.pop(key, None) for key in proxy_keys}
+        previous_no_proxy = os.environ.get("NO_PROXY")
+        previous_no_proxy_lower = os.environ.get("no_proxy")
+        os.environ["NO_PROXY"] = "*"
+        os.environ["no_proxy"] = "*"
+        try:
+            opener = build_opener(ProxyHandler({}))
+            return opener.open(request, timeout=timeout)
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            if previous_no_proxy is None:
+                os.environ.pop("NO_PROXY", None)
+            else:
+                os.environ["NO_PROXY"] = previous_no_proxy
+            if previous_no_proxy_lower is None:
+                os.environ.pop("no_proxy", None)
+            else:
+                os.environ["no_proxy"] = previous_no_proxy_lower
