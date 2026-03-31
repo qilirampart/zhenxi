@@ -16,6 +16,31 @@
 .\build_windows.ps1 -Clean
 ```
 
+## macOS 打包
+
+Windows 机器不能直接产出可运行的 mac 包。
+
+当前仓库已经提供两种 mac 打包方式：
+
+1. 有 Mac 时本地执行：
+
+```bash
+chmod +x ./build_macos.sh
+./build_macos.sh --clean
+```
+
+2. 没有 Mac 时，使用 GitHub Actions：
+
+- 打开仓库 `Actions`
+- 选择 `Build macOS App`
+- 点击 `Run workflow`
+- 等待构建完成后下载产物
+
+当前工作流先生成一份 `macOS Intel` 版本，文件名为：
+
+- `zhenxi-macos-intel-app`
+- `zhenxi-macos-intel-zip`
+
 ## 包内结构
 
 - `zhenxi.exe`

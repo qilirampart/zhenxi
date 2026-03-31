@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
 from pathlib import Path
 
 
@@ -83,3 +84,11 @@ coll = COLLECT(
     upx_exclude=[],
     name="zhenxi",
 )
+
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="zhenxi.app",
+        icon=None,
+        bundle_identifier="com.zhenxi.app",
+    )
