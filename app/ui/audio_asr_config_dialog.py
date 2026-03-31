@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -50,6 +51,7 @@ class AudioASRConfigDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("音频 API 配置")
         self.setModal(True)
+        self.setMinimumSize(600, 460)
         self.resize(680, 560)
 
         self._service = TencentASRConfigService()
@@ -142,14 +144,26 @@ class AudioASRConfigDialog(QDialog):
         button_row.addWidget(self.cancel_button)
         button_row.addWidget(self.save_button)
 
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(14)
+        content_layout.addWidget(title)
+        content_layout.addWidget(subtitle)
+        content_layout.addLayout(form)
+        content_layout.addWidget(self.status_label)
+        content_layout.addWidget(self.detail_edit)
+        content_layout.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setWidget(content)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addLayout(form)
-        layout.addWidget(self.status_label)
-        layout.addWidget(self.detail_edit)
+        layout.addWidget(scroll, 1)
         layout.addLayout(button_row)
 
     def _load_current_config(self) -> None:

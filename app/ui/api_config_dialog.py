@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -54,6 +55,7 @@ class APIConfigDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("API 配置")
         self.setModal(True)
+        self.setMinimumSize(640, 520)
         self.resize(760, 720)
 
         self._service = APIConfigService()
@@ -183,16 +185,28 @@ class APIConfigDialog(QDialog):
         buttons.addWidget(self.cancel_button)
         buttons.addWidget(self.save_button)
 
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(14)
+        content_layout.addWidget(title)
+        content_layout.addWidget(subtitle)
+        content_layout.addLayout(selector_row)
+        content_layout.addWidget(self.active_hint_label)
+        content_layout.addLayout(form)
+        content_layout.addWidget(self.status_label)
+        content_layout.addWidget(self.detail_edit)
+        content_layout.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setWidget(content)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addLayout(selector_row)
-        layout.addWidget(self.active_hint_label)
-        layout.addLayout(form)
-        layout.addWidget(self.status_label)
-        layout.addWidget(self.detail_edit)
+        layout.addWidget(scroll, 1)
         layout.addLayout(buttons)
 
     def _load_current_config(self) -> None:
